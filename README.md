@@ -93,12 +93,6 @@ flowchart LR
     F --> G["🎮 Playable Game"]
 ```
 
-**PNG fallback** (if Mermaid doesn't render above):
-
-![State Machine](docs/state_machine.png)
-
-![Pipeline](docs/pipeline.png)
-
 **Key architectural decisions:**
 
 | Principle | Implementation |
