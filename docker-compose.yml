@@ -1,0 +1,17 @@
+services:
+  game-builder:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./outputs:/app/outputs
+    environment:
+      - BATCH_MODE=true
+      - OUTPUT_DIR=/app/outputs
+    stdin_open: true
+    tty: true
+    entrypoint: ["python", "-m", "app.main"]
+    command: ["--help"]
+    # Usage:
+    #   docker-compose run game-builder build --idea "make a space shooter" --batch
+    #   docker-compose run game-builder build --idea "dodge game" --interactive
