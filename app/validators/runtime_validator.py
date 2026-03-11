@@ -107,13 +107,17 @@ async def _run_browser_tests(
             )
 
             # Simulate keyboard inputs from the plan controls
+            # Use keyboard.down (hold) instead of press (tap) so game loop
+            # has time to process movement across multiple frames.
             keys = list(plan.controls.key_mappings.keys()) if plan.controls.key_mappings else [
                 "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"
             ]
-            for key in keys[:4]:
-                await page.keyboard.press(key)
-                await page.wait_for_timeout(100)
-            await page.wait_for_timeout(500)
+            # Pick a single directional key to avoid opposite-direction cancellation
+            test_key = keys[0] if keys else "ArrowRight"
+            await page.keyboard.down(test_key)
+            await page.wait_for_timeout(500)  # hold key for ~30 frames
+            await page.keyboard.up(test_key)
+            await page.wait_for_timeout(200)  # let last frame settle
 
             state_after = await page.evaluate(
                 "JSON.parse(JSON.stringify(window.__debug_state || {}))"
@@ -239,10 +243,10 @@ async def _run_browser_tests(
                 canvas = await page.query_selector("canvas")
                 if canvas:
                     screenshot_before = await canvas.screenshot()
-                    for key in ["ArrowLeft", "ArrowRight", "ArrowUp", "Space"]:
-                        await page.keyboard.press(key)
-                        await page.wait_for_timeout(100)
+                    await page.keyboard.down("ArrowRight")
                     await page.wait_for_timeout(500)
+                    await page.keyboard.up("ArrowRight")
+                    await page.wait_for_timeout(200)
                     screenshot_after = await canvas.screenshot()
                     checks.append(
                         ValidationCheck(

@@ -28,7 +28,7 @@ logger = structlog.get_logger()
 
 AST_ANALYSIS_SCRIPT = r"""
 const esprima = require('esprima');
-const code = require('fs').readFileSync(process.argv[1], 'utf-8');
+const code = require('fs').readFileSync(process.argv[2], 'utf-8');
 
 try {
     const ast = esprima.parseScript(code, { tolerant: true });

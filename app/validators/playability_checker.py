@@ -164,31 +164,49 @@ async def _run_playability_checks(
         )
 
         # Check 5: Keyboard event listeners registered
-        has_key_listeners = await page.evaluate("""
+        # Use getEventListeners (Chrome DevTools protocol) or fall back to
+        # checking if the game JS source contains addEventListener for key events.
+        has_key_listeners = await page.evaluate(r"""
             () => {
-                // Check if keyboard events are handled
-                let hasListener = false;
-                const origAEL = EventTarget.prototype.addEventListener;
-                EventTarget.prototype.addEventListener = function(type, ...args) {
-                    if (type === 'keydown' || type === 'keyup' || type === 'keypress') {
-                        hasListener = true;
+                // Strategy 1: Check via internal listener tracking if available
+                if (typeof getEventListeners === 'function') {
+                    const docListeners = getEventListeners(document);
+                    if (docListeners.keydown || docListeners.keyup || docListeners.keypress) {
+                        return true;
                     }
-                    return origAEL.call(this, type, ...args);
-                };
-                // Dispatch a test event
-                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
-                EventTarget.prototype.addEventListener = origAEL;
-                return hasListener;
+                }
+                // Strategy 2: Inspect game source for keyboard registrations
+                const scripts = document.querySelectorAll('script[src]');
+                for (const s of scripts) {
+                    try {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('GET', s.src, false);
+                        xhr.send();
+                        if (/addEventListener\s*\(\s*['"]key(down|up|press)['"]/.test(xhr.responseText)) {
+                            return true;
+                        }
+                    } catch (e) {}
+                }
+                // Strategy 3: Check inline scripts
+                const inlineScripts = document.querySelectorAll('script:not([src])');
+                for (const s of inlineScripts) {
+                    if (/addEventListener\s*\(\s*['"]key(down|up|press)['"]/.test(s.textContent)) {
+                        return true;
+                    }
+                }
+                return false;
             }
         """)
 
-        # Fallback: check if state changes on keypress
+        # Fallback: hold a key and check if game state changes
         if not has_key_listeners:
             try:
-                state_pre = await page.evaluate("JSON.stringify(window.__debug_state || {})")
-                await page.keyboard.press("ArrowRight")
-                await page.wait_for_timeout(300)
-                state_post = await page.evaluate("JSON.stringify(window.__debug_state || {})")
+                state_pre = await page.evaluate("JSON.stringify(window.gameState || window.__debug_state || {})")
+                await page.keyboard.down("ArrowRight")
+                await page.wait_for_timeout(500)
+                await page.keyboard.up("ArrowRight")
+                await page.wait_for_timeout(200)
+                state_post = await page.evaluate("JSON.stringify(window.gameState || window.__debug_state || {})")
                 has_key_listeners = state_pre != state_post
             except Exception:
                 pass
