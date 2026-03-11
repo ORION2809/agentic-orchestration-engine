@@ -7,6 +7,7 @@ Tools:
     build_game      — Generate a playable browser game from a natural language idea
     validate_game   — Run validation checks against existing game files
     resume_build    — Resume a previously interrupted build from checkpoint
+    remix_game      — Modify an existing build with new instructions
     list_builds     — List all completed/failed build runs
     get_build_files — Retrieve the generated game files for a specific build
 
@@ -16,12 +17,14 @@ Resources:
     builds://{run_id}/game/{file} — Individual game file (index.html, style.css, game.js)
 
 Prompts:
-    game_idea_refiner — Help users refine vague game ideas into detailed specs
-    build_config      — Guide users through build configuration options
+    game_idea_refiner  — Help users refine vague game ideas into detailed specs
+    build_config_guide — Guide users through build configuration options
+    analyze_game_code  — Review generated code for a specific build
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -34,10 +37,11 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from app.config import Config
 from app.concurrency.controller import ConcurrencyController
+from app.models.state import AgentState
 from app.orchestrator import Orchestrator, create_stores
 
 # ── Configure structlog for MCP (JSON output, no rich console) ──────────────
@@ -56,15 +60,29 @@ structlog.configure(
 
 logger = structlog.get_logger()
 
+# ── Phase metadata for progress reporting ───────────────────────────────────
+# Maps each pipeline state to a (step_number, description) for progress bars.
+_PHASE_META: dict[str, tuple[int, str]] = {
+    "init": (0, "Initializing"),
+    "clarifying": (1, "Clarifying game idea"),
+    "planning": (2, "Planning architecture & mechanics"),
+    "building": (3, "Generating game code"),
+    "critiquing": (4, "Reviewing code for bugs"),
+    "validating": (5, "Running validation checks"),
+    "done": (6, "Build complete"),
+    "failed": (6, "Build failed"),
+}
+_TOTAL_PHASES = 6
+
 # ── FastMCP Server Instance ─────────────────────────────────────────────────
 mcp = FastMCP(
     "game-builder",
     instructions=(
         "Agentic Game-Builder AI — an MCP server that generates playable HTML5 "
         "browser games from natural language descriptions. Use the build_game tool "
-        "to create games, validate_game to check existing games, and list_builds to "
-        "see previous runs. Game files can be retrieved via the get_build_files tool "
-        "or as resources."
+        "to create games, validate_game to check existing games, remix_game to modify "
+        "existing builds, and list_builds to see previous runs. Game files can be "
+        "retrieved via the get_build_files tool or as resources."
     ),
 )
 
@@ -110,14 +128,58 @@ def _list_run_ids(base: Path | None = None) -> list[dict]:
     return runs
 
 
+def _make_progress_callback(ctx: Context, loop: asyncio.AbstractEventLoop):
+    """Create a sync callback that sends async MCP progress notifications.
+
+    The orchestrator runs in a worker thread, so we use loop.call_soon_threadsafe
+    to schedule coroutines back onto the event loop.
+    """
+
+    def _on_phase_transition(state: AgentState, build_number: int, retry_count: int):
+        step, description = _PHASE_META.get(state.value, (0, state.value))
+        if retry_count > 0:
+            description = f"{description} (retry {retry_count})"
+
+        # Schedule async notifications on the event loop from the worker thread
+        asyncio.run_coroutine_threadsafe(
+            ctx.report_progress(step, _TOTAL_PHASES, description), loop
+        )
+        asyncio.run_coroutine_threadsafe(
+            ctx.info(f"[{step}/{_TOTAL_PHASES}] {description}"), loop
+        )
+
+    return _on_phase_transition
+
+
+def _format_result(result) -> str:
+    """Serialize a RunResult to JSON for MCP responses."""
+    return json.dumps({
+        "run_id": result.run_id,
+        "success": result.success,
+        "status": result.status,
+        "output_path": result.output_path,
+        "total_tokens": result.total_tokens,
+        "cost_usd": round(result.cost_usd, 4),
+        "duration_seconds": result.duration_seconds,
+        "build_number": result.build_number,
+        "error": result.error,
+        "game_files": list((result.game_files or {}).keys()),
+        "hint": (
+            "Use get_build_files to retrieve the actual game source code, "
+            "or open the output_path/index.html in a browser to play."
+        ),
+    }, indent=2)
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TOOLS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 @mcp.tool()
-def build_game(
+async def build_game(
     idea: str,
+    ctx: Context,
     model: str = "gpt-4o",
     output_dir: str = "outputs",
 ) -> str:
@@ -128,7 +190,7 @@ def build_game(
 
     The pipeline uses LLM agents for each phase with deterministic state machine
     orchestration, AST-based code critique, Playwright behavioral validation,
-    and automatic repair cycles.
+    and automatic repair cycles. Progress notifications are sent for each phase.
 
     Args:
         idea: Natural language game description (e.g., "a space shooter with powerups",
@@ -142,6 +204,8 @@ def build_game(
         On success, the game files (index.html, style.css, game.js) are in the output path.
     """
     logger.info("mcp_build_game", idea=idea[:100], model=model)
+    await ctx.info(f"Starting build: \"{idea[:80]}\" (model={model})")
+    await ctx.report_progress(0, _TOTAL_PHASES, "Initializing pipeline")
 
     config = _get_config(output_dir=output_dir, model=model)
     controller = ConcurrencyController(config)
@@ -151,33 +215,23 @@ def build_game(
     if not can_start:
         return json.dumps({"success": False, "error": f"Concurrency limit: {reason}"})
 
+    loop = asyncio.get_running_loop()
     run_id = None
     try:
         controller.register_run(user_id, "pending")
         stores = create_stores(config)
-        orchestrator = Orchestrator(config, stores[0], stores[1])
+        progress_cb = _make_progress_callback(ctx, loop)
+        orchestrator = Orchestrator(config, stores[0], stores[1], progress_callback=progress_cb)
         run_id = orchestrator.context.run_id
         controller.release_run(user_id, "pending")
         controller.register_run(user_id, run_id)
 
-        result = orchestrator.run(idea)
+        # Run orchestrator in a thread to avoid blocking the MCP event loop
+        result = await loop.run_in_executor(None, orchestrator.run, idea)
 
-        return json.dumps({
-            "run_id": result.run_id,
-            "success": result.success,
-            "status": result.status,
-            "output_path": result.output_path,
-            "total_tokens": result.total_tokens,
-            "cost_usd": round(result.cost_usd, 4),
-            "duration_seconds": result.duration_seconds,
-            "build_number": result.build_number,
-            "error": result.error,
-            "game_files": list((result.game_files or {}).keys()),
-            "hint": (
-                "Use get_build_files to retrieve the actual game source code, "
-                "or open the output_path/index.html in a browser to play."
-            ),
-        }, indent=2)
+        await ctx.report_progress(_TOTAL_PHASES, _TOTAL_PHASES, "Complete")
+        await ctx.info(f"Build finished: success={result.success}, tokens={result.total_tokens}")
+        return _format_result(result)
 
     except Exception as exc:
         logger.exception("mcp_build_error", error=str(exc))
@@ -188,7 +242,7 @@ def build_game(
 
 
 @mcp.tool()
-def validate_game(game_dir: str) -> str:
+async def validate_game(game_dir: str, ctx: Context) -> str:
     """Run validation checks against existing game files in a directory.
 
     Performs: file existence, HTML structure, CSS validity, JS syntax (node --check),
@@ -203,11 +257,13 @@ def validate_game(game_dir: str) -> str:
         and security findings.
     """
     from app.validators.code_validator import run_code_validation_from_dir
-    from app.validators.security_scanner import scan_generated_code, has_blockers
+    from app.validators.security_scanner import has_blockers, scan_generated_code
 
     game_path = Path(game_dir)
     if not game_path.exists():
         return json.dumps({"passed": False, "error": f"Directory not found: {game_dir}"})
+
+    await ctx.info(f"Validating game files in {game_dir}")
 
     files = [f.name for f in game_path.iterdir() if f.is_file()]
     checks = run_code_validation_from_dir(game_path, files)
@@ -219,6 +275,10 @@ def validate_game(game_dir: str) -> str:
 
     security_findings = scan_generated_code(file_contents)
     blocker_failures = [c for c in checks if not c.passed and c.severity == "blocker"]
+
+    await ctx.info(
+        f"Validation done: {len(checks)} checks, {len(blocker_failures)} blockers"
+    )
 
     return json.dumps({
         "passed": len(blocker_failures) == 0,
@@ -249,12 +309,12 @@ def validate_game(game_dir: str) -> str:
 
 
 @mcp.tool()
-def resume_build(run_id: str, output_dir: str = "outputs") -> str:
+async def resume_build(run_id: str, ctx: Context, output_dir: str = "outputs") -> str:
     """Resume a previously interrupted or failed build from its checkpoint.
 
     The orchestrator saves checkpoints on every state transition. If a build
     was interrupted (crash, timeout, API error), it can be resumed from the
-    last successful state.
+    last successful state. Progress notifications are sent for each phase.
 
     Args:
         run_id: The run ID to resume (from a previous build_game result).
@@ -264,12 +324,20 @@ def resume_build(run_id: str, output_dir: str = "outputs") -> str:
         JSON with the resumed run result.
     """
     config = _get_config(output_dir=output_dir)
+    await ctx.info(f"Resuming build {run_id}")
 
+    loop = asyncio.get_running_loop()
     try:
         stores = create_stores(config)
+        progress_cb = _make_progress_callback(ctx, loop)
         orchestrator = Orchestrator.resume(run_id, config, stores[0], stores[1])
-        result = orchestrator.run(orchestrator.context.original_idea)
+        orchestrator._progress_callback = progress_cb
 
+        result = await loop.run_in_executor(
+            None, orchestrator.run, orchestrator.context.original_idea
+        )
+
+        await ctx.info(f"Resume finished: success={result.success}")
         return json.dumps({
             "run_id": result.run_id,
             "success": result.success,
@@ -289,7 +357,137 @@ def resume_build(run_id: str, output_dir: str = "outputs") -> str:
 
 
 @mcp.tool()
-def list_builds(output_dir: str = "outputs") -> str:
+async def remix_game(
+    run_id: str,
+    instructions: str,
+    ctx: Context,
+    model: str = "gpt-4o",
+    output_dir: str = "outputs",
+) -> str:
+    """Modify an existing game build with new instructions.
+
+    Takes a previously built game and re-runs the pipeline with the original idea
+    combined with your modification instructions. The LLM sees the existing code
+    and your changes, producing an updated version.
+
+    Examples:
+        - "Add a score multiplier power-up that appears every 30 seconds"
+        - "Change the visual style to neon cyberpunk with particle effects"
+        - "Add a start screen with instructions and a high score display"
+        - "Make the player a spaceship sprite instead of a rectangle"
+        - "Add sound effects using the Web Audio API"
+
+    Args:
+        run_id: The run ID of the build to remix (from list_builds or a previous build_game).
+        instructions: What to change. Be specific about additions, removals, or modifications.
+        model: LLM model to use. Default "gpt-4o".
+        output_dir: Base output directory. Default "outputs".
+
+    Returns:
+        JSON with the new run_id, success status, and output path.
+        The remixed game is a new build — the original is preserved.
+    """
+    logger.info("mcp_remix_game", run_id=run_id, instructions=instructions[:100])
+    await ctx.info(f"Remixing build {run_id}: \"{instructions[:80]}\"")
+
+    # 1. Load existing game files
+    base = Path(output_dir) / run_id / "latest"
+    if not base.exists():
+        return json.dumps({"success": False, "error": f"No build found at {base}"})
+
+    existing_files: dict[str, str] = {}
+    for name in ["index.html", "style.css", "game.js"]:
+        path = base / name
+        if path.exists():
+            existing_files[name] = path.read_text(encoding="utf-8")
+
+    if not existing_files.get("game.js"):
+        return json.dumps({"success": False, "error": "Original build has no game.js"})
+
+    # 2. Load original idea from run_result.json
+    result_path = Path(output_dir) / run_id / "run_result.json"
+    original_idea = "a browser game"
+    if result_path.exists():
+        try:
+            run_data = json.loads(result_path.read_text(encoding="utf-8"))
+            # Try to get from context snapshot
+            ctx_path = Path(output_dir) / run_id / "context.json"
+            if ctx_path.exists():
+                ctx_data = json.loads(ctx_path.read_text(encoding="utf-8"))
+                original_idea = ctx_data.get("original_idea", original_idea)
+        except Exception:
+            pass
+
+    # 3. Build a remix prompt that includes existing code + instructions
+    remix_idea = (
+        f"REMIX REQUEST — Modify an existing game.\n\n"
+        f"ORIGINAL IDEA: {original_idea}\n\n"
+        f"EXISTING CODE (game.js - {len(existing_files.get('game.js', ''))} chars):\n"
+        f"```javascript\n{existing_files.get('game.js', '')}\n```\n\n"
+        f"EXISTING HTML (index.html):\n"
+        f"```html\n{existing_files.get('index.html', '')}\n```\n\n"
+        f"EXISTING CSS (style.css):\n"
+        f"```css\n{existing_files.get('style.css', '')}\n```\n\n"
+        f"MODIFICATION INSTRUCTIONS: {instructions}\n\n"
+        f"Generate the COMPLETE updated game incorporating the requested changes. "
+        f"Keep everything that worked well in the original and apply the modifications."
+    )
+
+    await ctx.report_progress(0, _TOTAL_PHASES, "Preparing remix")
+
+    # 4. Run the full pipeline with the remix prompt
+    config = _get_config(output_dir=output_dir, model=model)
+    controller = ConcurrencyController(config)
+    user_id = "mcp_client"
+
+    can_start, reason = controller.can_start_run(user_id)
+    if not can_start:
+        return json.dumps({"success": False, "error": f"Concurrency limit: {reason}"})
+
+    loop = asyncio.get_running_loop()
+    new_run_id = None
+    try:
+        controller.register_run(user_id, "pending")
+        stores = create_stores(config)
+        progress_cb = _make_progress_callback(ctx, loop)
+        orchestrator = Orchestrator(config, stores[0], stores[1], progress_callback=progress_cb)
+        new_run_id = orchestrator.context.run_id
+        controller.release_run(user_id, "pending")
+        controller.register_run(user_id, new_run_id)
+
+        result = await loop.run_in_executor(None, orchestrator.run, remix_idea)
+
+        await ctx.report_progress(_TOTAL_PHASES, _TOTAL_PHASES, "Remix complete")
+        await ctx.info(f"Remix finished: success={result.success}, new_run_id={result.run_id}")
+
+        return json.dumps({
+            "run_id": result.run_id,
+            "original_run_id": run_id,
+            "success": result.success,
+            "status": result.status,
+            "output_path": result.output_path,
+            "total_tokens": result.total_tokens,
+            "cost_usd": round(result.cost_usd, 4),
+            "duration_seconds": result.duration_seconds,
+            "build_number": result.build_number,
+            "error": result.error,
+            "game_files": list((result.game_files or {}).keys()),
+            "hint": (
+                f"Original build {run_id} is preserved. "
+                "Use get_build_files to retrieve the remixed game source code."
+            ),
+        }, indent=2)
+
+    except Exception as exc:
+        logger.exception("mcp_remix_error", error=str(exc))
+        return json.dumps({"success": False, "error": str(exc)})
+    finally:
+        if new_run_id:
+            controller.release_run(user_id, new_run_id)
+
+
+@mcp.tool()
+async def list_builds(output_dir: str = "outputs") -> str:
     """List all previous game build runs with their status and metrics.
 
     Scans the output directory for completed runs and returns summary info
@@ -311,7 +509,7 @@ def list_builds(output_dir: str = "outputs") -> str:
 
 
 @mcp.tool()
-def get_build_files(run_id: str, output_dir: str = "outputs") -> str:
+async def get_build_files(run_id: str, output_dir: str = "outputs") -> str:
     """Retrieve the generated game source files for a specific build.
 
     Returns the full source code of index.html, style.css, and game.js
@@ -513,6 +711,65 @@ Use these tools in order:
 3. Suggest specific improvements that could make the game more polished.
 
 If the build failed, check the run result for error details and suggest fixes."""
+
+
+@mcp.prompt()
+def remix_workflow(run_id: str) -> str:
+    """Interactive workflow prompt for remixing an existing game build.
+
+    Guides the user through reviewing the current game, choosing modifications,
+    and executing the remix.
+
+    Args:
+        run_id: The build run ID to remix.
+    """
+    return f"""Let's remix game build **{run_id}**.
+
+## Step 1: Review the current game
+First, retrieve the source code:
+- `get_build_files(run_id="{run_id}")`
+
+Review what the game does: mechanics, visuals, controls, scoring.
+
+## Step 2: Choose modifications
+Here are common remix ideas (pick one or combine several):
+
+**Gameplay:**
+- Add power-ups (shield, speed boost, score multiplier)
+- Add progressive difficulty levels
+- Add a boss enemy or special challenge
+- Add combo/chain mechanics
+
+**Visuals:**
+- Switch to neon/cyberpunk style with glow effects
+- Add particle effects (explosions, trails, sparks)
+- Add screen shake on impact
+- Use gradients and shadows instead of flat colors
+
+**Audio:**
+- Add Web Audio API sound effects (shoot, hit, collect, game-over)
+- Add a simple background beat
+
+**UX:**
+- Add a start screen with instructions
+- Add a pause/resume feature
+- Add a high-score display (localStorage)
+- Add a restart button on game-over
+
+## Step 3: Execute the remix
+Once you've decided, use:
+```
+remix_game(run_id="{run_id}", instructions="your detailed changes here")
+```
+
+Be specific! For example:
+"Add a neon visual style with CSS glow effects, screen shake on collision,
+a score multiplier power-up that spawns every 20 seconds, and a high score
+display using localStorage."
+
+## Step 4: Compare
+After the remix completes, use `get_build_files` on the new run_id to compare
+the before/after code and verify your changes were applied."""
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

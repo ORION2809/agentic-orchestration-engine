@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -77,6 +78,7 @@ class Orchestrator:
         config: Config,
         checkpoint_store: CheckpointStore | None = None,
         artifact_store: ArtifactStore | None = None,
+        progress_callback: Callable[[AgentState, int, int], None] | None = None,
     ) -> None:
         self.config = config
         self.state = AgentState.INIT
@@ -128,6 +130,9 @@ class Orchestrator:
         self.model_tracker = ModelQualityTracker()
         self.chaos = ChaosInjector(config) if config.chaos_mode else None
 
+        # Progress callback for MCP notifications: (state, step, total_steps)
+        self._progress_callback = progress_callback
+
         # Timing
         self._phase_start: float = 0.0
         self._run_start: float = 0.0
@@ -159,6 +164,13 @@ class Orchestrator:
         METRICS.phase_duration.observe(elapsed, phase=old_state.value)
         con.print_phase(new_state)
         self._checkpoint()
+
+        # Notify MCP client of phase transition
+        if self._progress_callback:
+            try:
+                self._progress_callback(new_state, self.build_number, self.retry_count)
+            except Exception:  # pragma: no cover
+                pass  # Never let callback errors break the pipeline
 
     def _checkpoint(self) -> None:
         """Persist current state and context for crash recovery."""
