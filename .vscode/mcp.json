@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "game-builder": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OUTPUT_DIR": "outputs",
+        "BATCH_MODE": "true"
+      }
+    }
+  }
+}

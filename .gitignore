@@ -26,3 +26,6 @@ README_OLD.md
 package.json
 docs/GITHUB_SETUP.md
 scripts/
+
+# MCP config with local paths (user-specific)
+mcp_config/

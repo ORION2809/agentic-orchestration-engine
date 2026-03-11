@@ -1,6 +1,7 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white)
 ![Node.js](https://img.shields.io/badge/node.js-20-green?logo=node.js&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-1.26-purple?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTEyIDJMMiA3bDEwIDUgMTAtNXoiIGZpbGw9IndoaXRlIi8+PC9zdmc+)
 ![LLM](https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic-8A2BE2)
 ![Tests](https://img.shields.io/badge/tests-40%2B%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -243,6 +244,55 @@ docker run -it --rm \
 # Using docker-compose (reads .env file automatically)
 docker compose run game-builder build --idea "a dodge game" --batch
 ```
+
+### 🔌 MCP Server (Model Context Protocol)
+
+The game builder is also available as an **MCP server**, allowing any MCP-compatible client (Claude Desktop, VS Code Copilot, Cursor, etc.) to build games through tool calls.
+
+```bash
+# Run as MCP server (stdio transport)
+python -m app.mcp_server
+```
+
+**Available MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `build_game` | Generate a playable game from a natural language idea |
+| `validate_game` | Run validation checks against existing game files |
+| `resume_build` | Resume an interrupted build from checkpoint |
+| `list_builds` | List all previous builds with status and metrics |
+| `get_build_files` | Retrieve generated source code for a build |
+
+**VS Code Setup** — add to `.vscode/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "game-builder": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "${workspaceFolder}",
+      "env": { "OUTPUT_DIR": "outputs", "BATCH_MODE": "true" }
+    }
+  }
+}
+```
+
+**Claude Desktop Setup** — add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "game-builder": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/path/to/agentic-orchestration-engine",
+      "env": { "OPENAI_API_KEY": "your-key", "OUTPUT_DIR": "outputs" }
+    }
+  }
+}
+```
+
+The MCP server also exposes **resources** (`builds://{run_id}/result`, `builds://{run_id}/game/game.js`, etc.) and **prompts** (`game_idea_refiner`, `build_config_guide`) for richer client integration.
 
 ---
 
