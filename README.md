@@ -1,6 +1,6 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white)
 ![Node.js](https://img.shields.io/badge/node.js-20-green?logo=node.js&logoColor=white)
-![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-MCP%20ready-blue?logo=docker&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-1.26-purple?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTEyIDJMMiA3bDEwIDUgMTAtNXoiIGZpbGw9IndoaXRlIi8+PC9zdmc+)
 ![LLM](https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic-8A2BE2)
 ![Tests](https://img.shields.io/badge/tests-40%2B%20passing-brightgreen)
@@ -261,8 +261,11 @@ python -m app.mcp_server
 | `build_game` | Generate a playable game from a natural language idea |
 | `validate_game` | Run validation checks against existing game files |
 | `resume_build` | Resume an interrupted build from checkpoint |
+| `remix_game` | Load an existing build and modify it with new instructions |
 | `list_builds` | List all previous builds with status and metrics |
 | `get_build_files` | Retrieve generated source code for a build |
+
+All tools are **async** with `Context` injection, run the orchestrator in a thread pool, and emit **progress notifications** so clients can show real-time build status.
 
 **VS Code Setup** — add to `.vscode/mcp.json`:
 ```json
@@ -292,7 +295,66 @@ python -m app.mcp_server
 }
 ```
 
-The MCP server also exposes **resources** (`builds://{run_id}/result`, `builds://{run_id}/game/game.js`, etc.) and **prompts** (`game_idea_refiner`, `build_config_guide`) for richer client integration.
+The MCP server also exposes **resources** (`builds://{run_id}/result`, `builds://{run_id}/game/game.js`, etc.) and **prompts** (`game_idea_refiner`, `build_config_guide`, `analyze_game_code`, `remix_workflow`) for richer client integration.
+
+### 🐳 Docker MCP (Zero Local Dependencies)
+
+Run the MCP server via Docker — **no Python, Node.js, or Playwright installation required**. Anyone with Docker can use it:
+
+```bash
+# Build the Docker image (one-time)
+docker build -t game-builder-mcp .
+
+# Test it works
+docker run --rm --entrypoint python game-builder-mcp -c \
+  "from app.mcp_server import mcp; print('MCP server ready')"
+```
+
+**Claude Desktop (Docker)** — add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "game-builder": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OPENAI_API_KEY",
+        "-v", "./outputs:/app/outputs",
+        "--entrypoint", "python",
+        "game-builder-mcp",
+        "-m", "app.mcp_server"
+      ]
+    }
+  }
+}
+```
+
+**VS Code (Docker)** — add to `.vscode/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "game-builder-docker": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OPENAI_API_KEY",
+        "-v", "./outputs:/app/outputs",
+        "--entrypoint", "python",
+        "game-builder-mcp",
+        "-m", "app.mcp_server"
+      ]
+    }
+  }
+}
+```
+
+**Docker Compose** — use the `game-builder-mcp` service:
+```bash
+# Start MCP server (reads .env file automatically)
+docker compose run --rm game-builder-mcp
+```
+
+> **Note:** The MCP server uses **stdio transport** — Docker must be run with `-i` (stdin open). The `OPENAI_API_KEY` env var is passed from your host environment. Mount `./outputs:/app/outputs` to persist generated games on your machine.
 
 ---
 

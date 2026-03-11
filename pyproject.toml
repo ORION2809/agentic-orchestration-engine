@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-game-builder"
-version = "2.0.0"
+version = "2.1.0"
 description = "Agentic Game-Builder AI — converts NL game ideas into playable browser games via CLI or MCP"
 requires-python = ">=3.11"
 dependencies = [

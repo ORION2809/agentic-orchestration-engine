@@ -6,3 +6,4 @@ structlog>=23.0.0
 rich>=13.0.0
 playwright>=1.40.0
 python-dotenv>=1.0.0
+mcp[cli]>=1.26.0

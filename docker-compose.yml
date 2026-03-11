@@ -15,3 +15,31 @@ services:
     # Usage:
     #   docker-compose run game-builder build --idea "make a space shooter" --batch
     #   docker-compose run game-builder build --idea "dodge game" --interactive
+
+  # MCP Server mode — for AI assistant integration (Claude Desktop, VS Code, Cursor)
+  game-builder-mcp:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./outputs:/app/outputs
+    environment:
+      - BATCH_MODE=true
+      - OUTPUT_DIR=/app/outputs
+    stdin_open: true
+    entrypoint: ["python", "-m", "app.mcp_server"]
+    command: []
+    # This service runs the MCP server over stdio transport.
+    # MCP clients connect by launching this container and piping stdin/stdout.
+    #
+    # Claude Desktop config:
+    #   "game-builder": {
+    #     "command": "docker",
+    #     "args": ["run", "-i", "--rm", "-e", "OPENAI_API_KEY", "game-builder-mcp"]
+    #   }
+    #
+    # VS Code MCP config:
+    #   "game-builder-docker": {
+    #     "command": "docker",
+    #     "args": ["run", "-i", "--rm", "-e", "OPENAI_API_KEY", "-v", "./outputs:/app/outputs", "game-builder-mcp"]
+    #   }

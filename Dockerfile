@@ -40,6 +40,11 @@ RUN mkdir -p outputs
 ENV BATCH_MODE=true
 ENV OUTPUT_DIR=/app/outputs
 
-# Default entrypoint
+# Health check — verify Python and MCP server can import
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "from app.mcp_server import mcp; print('ok')" || exit 1
+
+# Default entrypoint (CLI mode)
+# Override with: --entrypoint python ... -m app.mcp_server  (for MCP mode)
 ENTRYPOINT ["python", "-m", "app.main"]
 CMD ["--help"]

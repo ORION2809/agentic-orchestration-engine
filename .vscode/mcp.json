@@ -8,6 +8,17 @@
         "OUTPUT_DIR": "outputs",
         "BATCH_MODE": "true"
       }
+    },
+    "game-builder-docker": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OPENAI_API_KEY",
+        "-v", "${workspaceFolder}/outputs:/app/outputs",
+        "--entrypoint", "python",
+        "game-builder-mcp",
+        "-m", "app.mcp_server"
+      ]
     }
   }
 }
