@@ -16,7 +16,7 @@
         "-e", "OPENAI_API_KEY",
         "-v", "${workspaceFolder}/outputs:/app/outputs",
         "--entrypoint", "python",
-        "game-builder-mcp",
+        "shreyas2809/game-builder-mcp",
         "-m", "app.mcp_server"
       ]
     }

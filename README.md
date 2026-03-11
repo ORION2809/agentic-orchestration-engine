@@ -1,6 +1,8 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white)
 ![Node.js](https://img.shields.io/badge/node.js-20-green?logo=node.js&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-MCP%20ready-blue?logo=docker&logoColor=white)
+![Docker Hub](https://img.shields.io/docker/v/shreyas2809/game-builder-mcp?label=Docker%20Hub&logo=docker&color=blue)
+![GHCR](https://img.shields.io/badge/GHCR-orion2809%2Fgame--builder--mcp-purple?logo=github)
 ![MCP](https://img.shields.io/badge/MCP-1.26-purple?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTEyIDJMMiA3bDEwIDUgMTAtNXoiIGZpbGw9IndoaXRlIi8+PC9zdmc+)
 ![LLM](https://img.shields.io/badge/LLM-OpenAI%20%7C%20Anthropic-8A2BE2)
 ![Tests](https://img.shields.io/badge/tests-40%2B%20passing-brightgreen)
@@ -301,12 +303,23 @@ The MCP server also exposes **resources** (`builds://{run_id}/result`, `builds:/
 
 Run the MCP server via Docker — **no Python, Node.js, or Playwright installation required**. Anyone with Docker can use it:
 
+**Pre-built images** (no build step needed):
 ```bash
-# Build the Docker image (one-time)
-docker build -t game-builder-mcp .
+# Docker Hub
+docker pull shreyas2809/game-builder-mcp:latest
 
-# Test it works
-docker run --rm --entrypoint python game-builder-mcp -c \
+# GitHub Container Registry
+docker pull ghcr.io/orion2809/game-builder-mcp:latest
+```
+
+Or build from source:
+```bash
+docker build -t game-builder-mcp .
+```
+
+Test it works:
+```bash
+docker run --rm --entrypoint python shreyas2809/game-builder-mcp -c \
   "from app.mcp_server import mcp; print('MCP server ready')"
 ```
 
@@ -321,7 +334,7 @@ docker run --rm --entrypoint python game-builder-mcp -c \
         "-e", "OPENAI_API_KEY",
         "-v", "./outputs:/app/outputs",
         "--entrypoint", "python",
-        "game-builder-mcp",
+        "shreyas2809/game-builder-mcp",
         "-m", "app.mcp_server"
       ]
     }
@@ -340,7 +353,7 @@ docker run --rm --entrypoint python game-builder-mcp -c \
         "-e", "OPENAI_API_KEY",
         "-v", "./outputs:/app/outputs",
         "--entrypoint", "python",
-        "game-builder-mcp",
+        "shreyas2809/game-builder-mcp",
         "-m", "app.mcp_server"
       ]
     }
@@ -355,6 +368,10 @@ docker compose run --rm game-builder-mcp
 ```
 
 > **Note:** The MCP server uses **stdio transport** — Docker must be run with `-i` (stdin open). The `OPENAI_API_KEY` env var is passed from your host environment. Mount `./outputs:/app/outputs` to persist generated games on your machine.
+>
+> **Registry images:**
+> - Docker Hub: [`shreyas2809/game-builder-mcp`](https://hub.docker.com/r/shreyas2809/game-builder-mcp)
+> - GHCR: [`ghcr.io/orion2809/game-builder-mcp`](https://ghcr.io/orion2809/game-builder-mcp)
 
 ---
 
