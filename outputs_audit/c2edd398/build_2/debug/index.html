@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Catch Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+
+// === DEBUG HOOK (injected by Agentic Game-Builder) ===
+(function() {
+    if (!window.__GAME_DEBUG__) return;
+
+    window.__debug_state = {};
+    window.__debug_frames = 0;
+    window.__debug_fps_samples = [];
+
+    var _origRAF = window.requestAnimationFrame;
+    var _lastTime = performance.now();
+    var _entityCountPrev = 0;
+
+    window.requestAnimationFrame = function(callback) {
+        return _origRAF.call(window, function(timestamp) {
+            // FPS tracking
+            window.__debug_frames++;
+            var delta = timestamp - _lastTime;
+            _lastTime = timestamp;
+            if (delta > 0) {
+                window.__debug_fps_samples.push(1000 / delta);
+                if (window.__debug_fps_samples.length > 60) {
+                    window.__debug_fps_samples.shift();
+                }
+            }
+
+            // Execute the original callback
+            callback(timestamp);
+
+            // Attempt to capture game state from common patterns
+            try {
+                // Look for common global game state objects
+                var stateKeys = ['gameState', 'state', 'game', 'GAME', 'gs'];
+                for (var i = 0; i < stateKeys.length; i++) {
+                    var candidate = window[stateKeys[i]];
+                    if (candidate && typeof candidate === 'object') {
+                        // Shallow copy relevant properties
+                        var s = {};
+                        var keys = Object.keys(candidate);
+                        for (var j = 0; j < keys.length; j++) {
+                            var k = keys[j];
+                            var v = candidate[k];
+                            if (typeof v !== 'function') {
+                                s[k] = v;
+                            }
+                        }
+                        // Extract player position
+                        if (candidate.player && typeof candidate.player === 'object') {
+                            s.player = { x: candidate.player.x, y: candidate.player.y };
+                        }
+                        // Extract score
+                        if ('score' in candidate) s.score = candidate.score;
+                        if ('gameOver' in candidate) s.gameOver = candidate.gameOver;
+
+                        // Entity growth tracking
+                        var entityCount = 0;
+                        if (Array.isArray(candidate.entities)) entityCount = candidate.entities.length;
+                        else if (Array.isArray(candidate.enemies)) entityCount = candidate.enemies.length;
+                        else if (Array.isArray(candidate.objects)) entityCount = candidate.objects.length;
+                        s.entityCount = entityCount;
+                        s._entityGrowthRate = entityCount - _entityCountPrev;
+                        _entityCountPrev = entityCount;
+
+                        window.__debug_state = s;
+                        break;
+                    }
+                }
+            } catch (e) {
+                // Silently fail — do not interfere with game
+            }
+        });
+    };
+})();
+// === END DEBUG HOOK ===
+
+</script>
+<script src="game.js"></script>
+</body>
+</html>

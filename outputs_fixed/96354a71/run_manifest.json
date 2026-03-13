@@ -1,0 +1,32 @@
+{
+  "run_id": "96354a71",
+  "model": "gpt-4o",
+  "prompt_versions": {
+    "builder_system.md": "66c894b1050ad7ba09558bdc1aa31f16b855e7852fb01f4186fc4541490f1375",
+    "builder_user.md": "cbdf23b8017f51b034a4dcfcee47d7276078c9d5397d94afb43b4c1fb761b6de",
+    "clarifier_system.md": "680a1cfb1a4c0eabffb0d14d6ddc2ed2b2dbe146c95edaf3def36c2c4b3ce148",
+    "clarifier_user.md": "5a9ed90a6189f1bb0cfa9a9f22e69ef1c5e858f28047461eff54f1a55f1af399",
+    "critic_system.md": "3ef2f85b46590c8d7460781aa653140a2ee86c0e61e35a4188db73be4c74ce61",
+    "critic_user.md": "5510e21fc7cfc9e2010885ee3114c8745325fb7d9e919d3591ffff8cba541e04",
+    "planner_system.md": "e0790aaf81382a1135d86ceae2d837f8fe517fc4d3292fddb568e1d448841755",
+    "planner_user.md": "9b0b2b60bb118c1c197627a91b01b3300321bedcca95904f9c505e3443157c14"
+  },
+  "token_summary": {
+    "total_tokens": 20675,
+    "per_phase": {
+      "clarifier": 557,
+      "planner": 1589,
+      "builder": 10810,
+      "critic": 7719
+    },
+    "per_model": {
+      "gpt-4o-mini": 9865,
+      "gpt-4o": 10810
+    },
+    "estimated_cost_usd": 0.0555,
+    "num_calls": 8
+  },
+  "success": false,
+  "status": "failed",
+  "build_number": 3
+}

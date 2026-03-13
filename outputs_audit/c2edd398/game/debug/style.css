@@ -1,0 +1,3 @@
+body { margin: 0; overflow: hidden; }
+canvas { display: block; background: #eee; margin: 0 auto; }
+#score { position: absolute; top: 10px; left: 10px; font-size: 20px; }
